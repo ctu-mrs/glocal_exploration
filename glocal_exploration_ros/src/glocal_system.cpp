@@ -64,7 +64,7 @@ GlocalSystem::GlocalSystem(const ros::NodeHandle& nh,
   buildComponents(nh_private_);
 
   // ROS
-  target_pub_ = nh_.advertise<geometry_msgs::Pose>("command/pose", 10);
+  target_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("command/pose", 10);
   odom_sub_ = nh_.subscribe("odometry", 1, &GlocalSystem::odomCallback, this);
   collision_check_timer_ = nh_.createTimer(
       collision_check_period_,
@@ -205,16 +205,18 @@ void GlocalSystem::loopIteration() {
 
 void GlocalSystem::publishTargetPose() {
   // publish the target pose.
-  geometry_msgs::Pose msg;
+  geometry_msgs::PoseStamped msg;
+  msg.header.frame_id = "uav1/fixed_origin";
+  msg.header.stamp = ros::Time::now();
   tf2::Quaternion q;
   q.setRPY(0, 0, target_yaw_);
-  msg.position.x = target_position_.x();
-  msg.position.y = target_position_.y();
-  msg.position.z = target_position_.z();
-  msg.orientation.x = q.x();
-  msg.orientation.y = q.y();
-  msg.orientation.z = q.z();
-  msg.orientation.w = q.w();
+  msg.pose.position.x = target_position_.x();
+  msg.pose.position.y = target_position_.y();
+  msg.pose.position.z = target_position_.z();
+  msg.pose.orientation.x = q.x();
+  msg.pose.orientation.y = q.y();
+  msg.pose.orientation.z = q.z();
+  msg.pose.orientation.w = q.w();
   target_pub_.publish(msg);
 
   // Update the tracking state.
