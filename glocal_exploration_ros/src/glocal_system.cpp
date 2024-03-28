@@ -206,7 +206,7 @@ void GlocalSystem::loopIteration() {
 void GlocalSystem::publishTargetPose() {
   // publish the target pose.
   geometry_msgs::PoseStamped msg;
-  msg.header.frame_id = "uav1/fixed_origin";
+  msg.header.frame_id = "odom";
   msg.header.stamp = ros::Time::now();
   tf2::Quaternion q;
   q.setRPY(0, 0, target_yaw_);
