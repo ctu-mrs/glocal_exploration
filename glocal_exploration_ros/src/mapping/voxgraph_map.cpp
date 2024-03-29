@@ -322,6 +322,7 @@ bool VoxgraphMap::isLineTraversableInActiveSubmap(
     }
     return true;
   } else {
+    ROS_WARN("Test if line is traversable in activ submap seems to pass as FALSE!!!!");
     return false;
   }
 }

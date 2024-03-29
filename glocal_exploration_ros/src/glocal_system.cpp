@@ -6,6 +6,10 @@
 #include <std_msgs/Float32.h>
 #include <tf2/utils.h>
 
+#include <mrs_msgs/Reference.h>
+#include <mrs_msgs/ReferenceStampedSrv.h>
+/* #include <mrs_lib/transformer.h> */
+
 #include "glocal_exploration_ros/conversions/ros_component_factory.h"
 
 namespace glocal_exploration {
@@ -39,7 +43,7 @@ void GlocalSystem::Config::printFields() const {
   printField("collision_check_period_s", collision_check_period_s);
   printField("max_planner_update_frequency", max_planner_update_frequency);
 }
-
+/* GlocalSystem //{ */
 GlocalSystem::GlocalSystem(const ros::NodeHandle& nh,
                            const ros::NodeHandle& nh_private)
     : GlocalSystem(nh, nh_private,
@@ -66,15 +70,25 @@ GlocalSystem::GlocalSystem(const ros::NodeHandle& nh,
   // ROS
   target_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("command/pose", 10);
   odom_sub_ = nh_.subscribe("odometry", 1, &GlocalSystem::odomCallback, this);
+
   collision_check_timer_ = nh_.createTimer(
       collision_check_period_,
       std::bind(&GlocalSystem::performCollisionAvoidance, this));
+
   total_planning_cpu_time_pub_ =
       nh_.advertise<std_msgs::Float32>("total_planning_cpu_time", 1);
+
   collision_avoidance_pub_ = nh_private_.advertise<geometry_msgs::PointStamped>(
       "collision_avoidance", 1);
-}
 
+  /* std::shared_ptr<mrs_lib::Transformer> transformer_; */
+  /* transformer_->setDefaultPrefix("uav1"); */
+  /* transformer_->retryLookupNewest(true); */
+
+}
+//}
+
+/* void buildComponents() //{ */
 void GlocalSystem::buildComponents(const ros::NodeHandle& nh) {
   // Initialize the communicator
   comm_ = std::make_shared<Communicator>();
@@ -91,6 +105,7 @@ void GlocalSystem::buildComponents(const ros::NodeHandle& nh) {
   ros::NodeHandle nh_mapping(nh, "mapping");
   comm_->setupMap(ComponentFactoryROS::createMap(nh_mapping, comm_));
 
+
   // setup the local planner + visualizer
   ros::NodeHandle nh_local_planner(nh, "local_planner");
   comm_->setupLocalPlanner(
@@ -106,7 +121,9 @@ void GlocalSystem::buildComponents(const ros::NodeHandle& nh) {
       ComponentFactoryROS::createGlobalPlannerVisualizer(nh_global_planner,
                                                          comm_);
 }
+//}
 
+/* void mainLoop() //{ */
 void GlocalSystem::mainLoop() {
   // This is the main loop, spinning is managed explicitly for efficiency
   // starting the main loop means everything is setup.
@@ -116,7 +133,10 @@ void GlocalSystem::mainLoop() {
   run_srv_ = nh_private_.advertiseService("toggle_running",
                                           &GlocalSystem::runSrvCallback, this);
 
+  service_client_reference_ = nh_.serviceClient<mrs_msgs::ReferenceStampedSrv>("reference_out");
+
   // Limit the maximum update frequency.
+  //
   // NOTE: This is mainly intended to avoid spinning at unlimited rates in case
   //       a loopIteration() returns immediately. For example, when the global
   //       planner is idling while waiting for the next waypoint to be reached.
@@ -142,7 +162,9 @@ void GlocalSystem::mainLoop() {
   LOG_IF(INFO, config_.verbosity >= 1)
       << "Glocal Exploration Planner finished planning.";
 }
+//}
 
+/* void loopIteration() //{ */
 void GlocalSystem::loopIteration() {
   // Start tracking the planning CPU time
   // NOTE: This way of measuring the CPU usage of the planners assumes that they
@@ -157,11 +179,13 @@ void GlocalSystem::loopIteration() {
     case StateMachine::State::kLocalPlanning: {
       comm_->localPlanner()->executePlanningIteration();
       local_planner_visualizer_->visualize();
+      ROS_WARN_THROTTLE(1,"[GlocalSystem]: using local planner");
       break;
     }
     case StateMachine::State::kGlobalPlanning: {
       comm_->globalPlanner()->executePlanningIteration();
       global_planner_visualizer_->visualize();
+      ROS_WARN_THROTTLE(1,"[GlocalSystem]: using global planner");
       break;
     }
     default:
@@ -202,7 +226,9 @@ void GlocalSystem::loopIteration() {
     total_planning_cpu_time_pub_.publish(total_planning_cpu_time_msg);
   }
 }
+//}
 
+/* void publishTargetPose() //{ */
 void GlocalSystem::publishTargetPose() {
   // publish the target pose.
   geometry_msgs::PoseStamped msg;
@@ -217,7 +243,18 @@ void GlocalSystem::publishTargetPose() {
   msg.pose.orientation.y = q.y();
   msg.pose.orientation.z = q.z();
   msg.pose.orientation.w = q.w();
-  target_pub_.publish(msg);
+  /* target_pub_.publish(msg); */
+
+  mrs_msgs::ReferenceStamped ref_msg;
+  ref_msg.reference.position.x = target_position_.x();
+  ref_msg.reference.position.y = target_position_.y();
+  ref_msg.reference.position.z = target_position_.z();
+  ref_msg.reference.heading = target_yaw_;
+
+  ref_msg.header.frame_id = "uav1/fixed_origin";
+  ref_msg.header.stamp = ros::Time::now();
+
+  GlocalSystem::referenceStampedSrv(ref_msg);
 
   // Update the tracking state.
   comm_->setTargetReached(false);
@@ -231,17 +268,55 @@ void GlocalSystem::publishTargetPose() {
   }
   last_waypoint_published_ = ros::Time::now();
 }
+//}
 
+/* void odomCallback(const nav_msgs::Odometry& msg) //{ */
 void GlocalSystem::odomCallback(const nav_msgs::Odometry& msg) {
   // Track the current pose
-  current_position_ = Point(msg.pose.pose.position.x, msg.pose.pose.position.y,
-                            msg.pose.pose.position.z);
+  
+  nav_msgs::Odometry uav_odom = msg;
+
+  /* perform transformation to the global frame //{ */
+  {
+    /* /1* get transformation to the global (GPS) frame //{ *1/ */
+    /* std::optional<geometry_msgs::TransformStamped> tf; */
+    {
+      /* std::scoped_lock lock(transform_mutex); */
+      /* tf = transformer_->getTransform(uav_odom.header.frame_id, "uav1/fixed_origin", uav_odom.header.stamp);  // TODO: do not hardcode the fcu frame */
+    }
+
+    /* if (!tf) { */
+    /*   ROS_ERROR("[TrajectoryHandler]: callbackUavCmdOdometry could not obtain transform from %s to %s.", uav_odom.header.frame_id.c_str(), */
+    /*             "uav1/fixed_origin"); */
+    /*   return; */
+    /* } */
+    /* //} */
+
+    /* /1* transform position and orientation //{ *1/ */
+    /* { */
+    /*   geometry_msgs::PoseWithCovarianceStamped meas; */
+    /*   meas.header    = uav_odom.header; */
+    /*   meas.pose.pose = uav_odom.pose.pose; */
+
+    /*   if (auto tf_tmp = transformer_->transform(meas, tf.value())) { */
+    /*     uav_odom.pose         = tf_tmp.value().pose; */
+    /*   } else { */
+    /*     ROS_INFO_STREAM("[GlocalSystem]: Failed to get transformation for position and orientation."); */
+    /*     return; */
+    /*   } */
+    /* } */
+    /* //} */
+  }
+  //}
+  
+  current_position_ = Point(uav_odom.pose.pose.position.x, uav_odom.pose.pose.position.y,
+                            uav_odom.pose.pose.position.z);
   current_orientation_ = Eigen::Quaterniond(
-      msg.pose.pose.orientation.w, msg.pose.pose.orientation.x,
-      msg.pose.pose.orientation.y, msg.pose.pose.orientation.z);
+      uav_odom.pose.pose.orientation.w, uav_odom.pose.pose.orientation.x,
+      uav_odom.pose.pose.orientation.y, uav_odom.pose.pose.orientation.z);
 
   // update the state machine with the current pose.
-  FloatingPoint yaw = tf2::getYaw(msg.pose.pose.orientation);
+  FloatingPoint yaw = tf2::getYaw(uav_odom.pose.pose.orientation);
   WayPoint current_point;
   current_point.position = current_position_;
   current_point.yaw = yaw;
@@ -289,6 +364,9 @@ void GlocalSystem::odomCallback(const nav_msgs::Odometry& msg) {
   }
 }
 
+//}
+
+/* bool startExploration() //{ */
 bool GlocalSystem::startExploration() {
   if (comm_->stateMachine()->currentState() != StateMachine::State::kReady) {
     // Can not start from another state than ready.
@@ -306,12 +384,17 @@ bool GlocalSystem::startExploration() {
   return true;
 }
 
+//}
+
+/* bool runSrvCallback() //{ */
 bool GlocalSystem::runSrvCallback(std_srvs::SetBool::Request& req,
                                   std_srvs::SetBool::Response& res) {
   res.success = startExploration();
   return true;
 }
+//}
 
+/* performCollisionAvoidance() //{ */
 void GlocalSystem::performCollisionAvoidance() {
   ros::Time current_timestamp = ros::Time::now();
   if (1.2 * collision_check_period_.toSec() <
@@ -357,7 +440,7 @@ void GlocalSystem::performCollisionAvoidance() {
 
           // Visualize the goal point chosen by the collision avoidance
           geometry_msgs::PointStamped goal_point_msg;
-          goal_point_msg.header.frame_id = "odom";
+          goal_point_msg.header.frame_id = "uav1/fixed_origin";
           goal_point_msg.header.stamp = current_timestamp;
           goal_point_msg.point.x = safe_waypoint.position.x();
           goal_point_msg.point.y = safe_waypoint.position.y();
@@ -368,5 +451,29 @@ void GlocalSystem::performCollisionAvoidance() {
     }
   }
 }
+
+//}
+
+/* trajectorySrv() //{ */
+bool GlocalSystem::referenceStampedSrv(const mrs_msgs::ReferenceStamped& msg) {
+  mrs_msgs::ReferenceStampedSrv srv;
+  srv.request.reference = msg.reference;
+  srv.request.header.frame_id = "uav1/fixed_origin";
+  srv.request.header.stamp = ros::Time::now();
+
+  bool res = service_client_reference_.call(srv);
+
+  if (res) {
+    if (!srv.response.success) {
+      ROS_WARN("[GlocalReferenceHandler]: service call for reference returned: '%s'", srv.response.message.c_str());
+    }
+    return srv.response.success;
+  } else {
+    ROS_ERROR("[GlocalReferenceHandler]: service call for reference failed!");
+    return false;
+  }
+}
+
+//}
 
 }  // namespace glocal_exploration

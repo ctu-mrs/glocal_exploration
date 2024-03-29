@@ -76,6 +76,7 @@
             <remap from="~pointcloud" to="/$(arg mav_name)/point_cloud_manager/transformed_pointcloud_out"/>
             <remap from="odometry" to="/$(arg mav_name)/estimation_manager/odom_main"/>
             <remap from="command/pose" to="/$(arg mav_name)/command/pose"/>
+            <remap from="reference_out" to="/$(arg mav_name)/control_manager/reference" />
             <remap from="~/global_planner/submap_in"
                    to="~/mapping/submap_esdfs"/>
             <remap from="~/global_planner/submap_pose_in"

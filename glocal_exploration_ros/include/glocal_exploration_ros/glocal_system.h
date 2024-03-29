@@ -13,10 +13,19 @@
 #include "glocal_exploration_ros/visualization/global_planner_visualizer_base.h"
 #include "glocal_exploration_ros/visualization/local_planner_visualizer_base.h"
 
+#include <mrs_msgs/ReferenceStamped.h>
+#include <mrs_msgs/ReferenceStampedSrv.h>
+
+/* #include <mrs_lib/transformer.h> */
+/* #include <mrs_lib/mutex.h> */
+
 namespace glocal_exploration {
 
 class GlocalSystem {
  public:
+
+  /* std::shared_ptr<mrs_lib::Transformer> transformer_; */
+
   struct Config : public config_utilities::Config<Config> {
     int verbosity = 1;
     FloatingPoint replan_position_threshold = 0.2f;  // m
@@ -54,13 +63,16 @@ class GlocalSystem {
 
  protected:
   ros::NodeHandle nh_;
-  ros::NodeHandle nh_private_;
+  ros::NodeHandle nh_private_; 
+
 
   // Subscribers and publishers.
   ros::Subscriber odom_sub_;
   ros::Publisher target_pub_;
   ros::Publisher total_planning_cpu_time_pub_;
   ros::ServiceServer run_srv_;
+  ros::ServiceClient service_client_reference_;
+  bool               referenceStampedSrv(const mrs_msgs::ReferenceStamped& msg);
 
   // Components.
   const Config config_;
@@ -90,6 +102,8 @@ class GlocalSystem {
   ros::Time collision_check_last_timestamp_;
   bool signal_collision_avoidance_triggered_;
   ros::Publisher collision_avoidance_pub_;
+
+  /* std::mutex transform_mutex; */
 };
 
 }  // namespace glocal_exploration
